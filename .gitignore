@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets — NEVER commit these
+.env
+*.env.local
+*.env.production
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Bundled Windows Python runtime (not for the server)
+python/
+
+# Extraction output (generated at runtime)
+BusbarX_Output/
+/output/
+
+# GUI launcher files (not for the server)
+*.exe
+launcher.py
+app.ico

@@ -1,0 +1,20 @@
+# ── BusbarX core (from Milestone 3) ──────────────────────────────────────────
+cadquery==2.7.0
+cadquery-ocp==7.8.1.1.post1
+numpy==2.4.6
+matplotlib==3.10.9
+
+# ── API framework ─────────────────────────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.19          # multipart/form-data file uploads
+pydantic==2.10.4
+starlette==0.41.3
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.24.0
+httpx==0.28.1                     # ASGI test client for FastAPI
+
+# ── not needed in Docker (GUI), but kept for local dev completeness ───────────
+# customtkinter==5.2.2            # GUI only — excluded from server build

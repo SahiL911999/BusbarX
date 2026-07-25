@@ -1,0 +1,170 @@
+{
+  "part_number": "46004-641-01",
+  "schema_version": "step-v2",
+  "source": "STEP",
+  "units": "mm",
+  "metadata": {
+    "material": null,
+    "plating": null,
+    "edge_condition": null,
+    "revision": null,
+    "manufacturing": {}
+  },
+  "coordinate_system": {
+    "origin": "top_left",
+    "x_axis": "length",
+    "y_axis": "width",
+    "angle_reference": "degrees_from_x_axis",
+    "basis": "flat_pattern"
+  },
+  "bend_parameters": {
+    "method": "k_factor",
+    "value": 0.44,
+    "profile": "default",
+    "configurable": true
+  },
+  "part": {
+    "is_bent": true,
+    "bend_count": 3,
+    "flat_pattern_status": "computed",
+    "flat_pattern": {
+      "length_mm": 939.62,
+      "width_mm": 152.4,
+      "thickness_mm": 12.7
+    },
+    "formed_footprint": {
+      "length_mm": 577.85,
+      "width_mm": 152.4
+    }
+  },
+  "features": [
+    {
+      "id": 1,
+      "type": "obround",
+      "x_mm": 35.56,
+      "y_mm": 38.1,
+      "size_mm": {
+        "length": 19.05,
+        "width": 14.224
+      },
+      "orientation_deg": 90.0,
+      "source": "STEP",
+      "confidence": 1.0,
+      "in_bounds": true
+    },
+    {
+      "id": 2,
+      "type": "obround",
+      "x_mm": 901.5202,
+      "y_mm": 38.1,
+      "size_mm": {
+        "length": 19.05,
+        "width": 14.224
+      },
+      "orientation_deg": 90.0,
+      "source": "STEP",
+      "confidence": 1.0,
+      "in_bounds": true
+    },
+    {
+      "id": 3,
+      "type": "round",
+      "x_mm": 735.1502,
+      "y_mm": 76.2,
+      "size_mm": {
+        "diameter": 33.325
+      },
+      "orientation_deg": null,
+      "source": "STEP",
+      "confidence": 1.0,
+      "in_bounds": true
+    },
+    {
+      "id": 4,
+      "type": "obround",
+      "x_mm": 35.56,
+      "y_mm": 114.3,
+      "size_mm": {
+        "length": 19.05,
+        "width": 14.224
+      },
+      "orientation_deg": 90.0,
+      "source": "STEP",
+      "confidence": 1.0,
+      "in_bounds": true
+    },
+    {
+      "id": 5,
+      "type": "obround",
+      "x_mm": 901.5202,
+      "y_mm": 114.3,
+      "size_mm": {
+        "length": 19.05,
+        "width": 14.224
+      },
+      "orientation_deg": 90.0,
+      "source": "STEP",
+      "confidence": 1.0,
+      "in_bounds": true
+    }
+  ],
+  "bends": [
+    {
+      "id": 1,
+      "line_start_mm": [
+        94.7667,
+        152.4
+      ],
+      "line_end_mm": [
+        94.7667,
+        0.0
+      ],
+      "angle_deg": 90.0,
+      "radius_mm": 12.7,
+      "direction": "up",
+      "affected_segment": "flange_3",
+      "source": "STEP"
+    },
+    {
+      "id": 2,
+      "line_start_mm": [
+        189.5334,
+        0.0
+      ],
+      "line_end_mm": [
+        189.5334,
+        152.4
+      ],
+      "angle_deg": 90.0,
+      "radius_mm": 12.7,
+      "direction": "down",
+      "affected_segment": "flange_1",
+      "source": "STEP"
+    },
+    {
+      "id": 3,
+      "line_start_mm": [
+        637.8434,
+        0.0
+      ],
+      "line_end_mm": [
+        637.8434,
+        152.4
+      ],
+      "angle_deg": 90.0,
+      "radius_mm": 12.7,
+      "direction": "up",
+      "affected_segment": "flange_2",
+      "source": "STEP"
+    }
+  ],
+  "validation": {
+    "status": "pass",
+    "source": "STEP",
+    "features_total": 5,
+    "bends_total": 3,
+    "out_of_bounds_ids": [],
+    "flat_pattern_status": "computed",
+    "notes": null
+  }
+}

@@ -1,0 +1,33 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml — local development / integration testing
+#
+# Usage:
+#   docker compose up --build       # first run
+#   docker compose up               # subsequent runs
+#   docker compose down -v          # stop + remove volumes
+# ─────────────────────────────────────────────────────────────────────────────
+version: "3.9"
+
+services:
+  busbarx-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: busbarx-api
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      WORKER_THREADS: "${WORKER_THREADS:-4}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      API_KEY: "${API_KEY:-}"                   # leave blank to disable auth
+      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+      SINGLE_TIMEOUT_S: "${SINGLE_TIMEOUT_S:-120}"
+      MPLBACKEND: "Agg"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3

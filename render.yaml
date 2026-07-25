@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# render.yaml — Render.com infrastructure-as-code
+#
+# Push this file to GitHub root. Render reads it automatically.
+# Service type: WEB (not background worker — needs a public HTTPS URL).
+#
+# Select "Standard" plan (2 GB RAM) minimum for CadQuery/OCC.
+# "Pro" (4 GB) for production with concurrent requests.
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  - type: web
+    name: busbarx-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    branch: main                         # auto-deploy on push to main
+    plan: standard                       # standard=2GB RAM — minimum for OCC
+
+    healthCheckPath: /v1/health          # Render polls this before routing traffic
+
+    envVars:
+      - key: PORT
+        value: "10000"                   # Render assigns $PORT; use 10000 as default
+      - key: WORKER_THREADS
+        value: "4"
+      - key: LOG_LEVEL
+        value: "info"
+      - key: MPLBACKEND
+        value: "Agg"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: SINGLE_TIMEOUT_S
+        value: "120"
+      # API_KEY: set via Render dashboard (Secrets) — do NOT put the value here
+      - key: API_KEY
+        sync: false                      # prompts to set in dashboard

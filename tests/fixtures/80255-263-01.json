@@ -1,0 +1,95 @@
+{
+  "part_number": "80255-263-01",
+  "schema_version": "step-v2",
+  "source": "STEP",
+  "units": "mm",
+  "metadata": {
+    "material": null,
+    "plating": null,
+    "edge_condition": null,
+    "revision": null,
+    "manufacturing": {}
+  },
+  "coordinate_system": {
+    "origin": "top_left",
+    "x_axis": "length",
+    "y_axis": "width",
+    "angle_reference": "degrees_from_x_axis",
+    "basis": "flat_pattern"
+  },
+  "bend_parameters": {
+    "method": "k_factor",
+    "value": 0.44,
+    "profile": "default",
+    "configurable": true
+  },
+  "part": {
+    "is_bent": true,
+    "bend_count": 1,
+    "flat_pattern_status": "computed",
+    "flat_pattern": {
+      "length_mm": 127.208,
+      "width_mm": 63.5,
+      "thickness_mm": 6.35
+    },
+    "formed_footprint": {
+      "length_mm": 83.058,
+      "width_mm": 63.5
+    }
+  },
+  "features": [
+    {
+      "id": 1,
+      "type": "round",
+      "x_mm": 22.352,
+      "y_mm": 31.75,
+      "size_mm": {
+        "diameter": 11.1
+      },
+      "orientation_deg": null,
+      "source": "STEP",
+      "confidence": 1.0,
+      "in_bounds": true
+    },
+    {
+      "id": 2,
+      "type": "round",
+      "x_mm": 101.8079,
+      "y_mm": 31.75,
+      "size_mm": {
+        "diameter": 11.1
+      },
+      "orientation_deg": null,
+      "source": "STEP",
+      "confidence": 1.0,
+      "in_bounds": true
+    }
+  ],
+  "bends": [
+    {
+      "id": 1,
+      "line_start_mm": [
+        63.1999,
+        0.0
+      ],
+      "line_end_mm": [
+        63.1999,
+        63.5
+      ],
+      "angle_deg": 90.0,
+      "radius_mm": 12.7,
+      "direction": "up",
+      "affected_segment": "flange_1",
+      "source": "STEP"
+    }
+  ],
+  "validation": {
+    "status": "pass",
+    "source": "STEP",
+    "features_total": 2,
+    "bends_total": 1,
+    "out_of_bounds_ids": [],
+    "flat_pattern_status": "computed",
+    "notes": null
+  }
+}
