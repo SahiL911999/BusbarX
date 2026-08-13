@@ -8,10 +8,13 @@ Tests:
 - Exceed MAX_FILES (>10) → 422
 - Empty file list → 422
 - Custom bend profile applied to batch
+- Uploaded files are deleted from disk once the batch completes
 """
 import asyncio
+import glob
 import json
 import os
+import tempfile
 import time
 import pytest
 
@@ -190,3 +193,27 @@ async def test_batch_custom_profile(client):
     assert r["ok"]
     bp = r["result"]["bend_parameters"]
     assert bp["value"] == pytest.approx(0.35)
+
+
+# ── data-retention regression ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_batch_upload_files_deleted_after_completion(client):
+    """Uploaded STEP files must not remain on disk once the batch job completes
+    (no-persistence data-handling requirement)."""
+    tmp_root = tempfile.gettempdir()
+    before = set(glob.glob(os.path.join(tmp_root, "busbarx_batch_*")))
+
+    with open(STP_SBV, "rb") as fh:
+        resp = await client.post(
+            "/v1/extract/batch",
+            files=[("files", ("SBV13019.stp", fh, "application/octet-stream"))],
+            data={"profile_name": "default"},
+        )
+    assert resp.status_code == 202
+    job = await _poll_until_done(client, resp.json()["poll_url"])
+    assert job["status"] == "completed"
+
+    new_dirs = set(glob.glob(os.path.join(tmp_root, "busbarx_batch_*"))) - before
+    leaked = [d for d in new_dirs if os.path.isdir(d)]
+    assert not leaked, f"batch upload directory was not cleaned up: {leaked}"

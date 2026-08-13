@@ -7,12 +7,13 @@ CAD operations never block HTTP request handling.
 Usage:
     pool = WorkerPool(n_threads=4)
     pool.start()
-    pool.submit(job_id, paths, profile, store)
+    pool.submit(job_id, paths, profile, store, upload_dir=upload_dir)
     pool.stop()
 """
 import base64
 import logging
 import os
+import shutil
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
@@ -20,7 +21,6 @@ from typing import List, Optional
 
 from busbarx import extract as _extract
 from busbarx import render as _render
-from busbarx import bend_profiles
 
 from .job_store import JobStore
 
@@ -49,12 +49,9 @@ def _run_single(step_path: str, profile: dict) -> dict:
         json_path = os.path.join(tmpdir, part + ".json")
         png_path = os.path.join(tmpdir, part + "_flat.png")
         try:
-            prof = bend_profiles.load_profile(
-                profile.get("name", "default"),
-                path=None
-            ) if isinstance(profile, str) else profile
-
-            result = _extract.to_json(step_path, profile=prof)
+            # profile is always a resolved dict by the time it reaches the worker
+            # (see api/routers/extract.py:_resolve_profile) — no string form exists.
+            result = _extract.to_json(step_path, profile=profile)
 
             import json
             with open(json_path, "w", encoding="utf-8") as f:
@@ -77,20 +74,31 @@ def _run_single(step_path: str, profile: dict) -> dict:
 
 
 def _batch_task(job_id: str, step_paths: List[str], profile: dict,
-                store: JobStore) -> None:
-    """Worker function — runs in the thread pool."""
-    store.set_processing(job_id)
-    results = []
-    for i, path in enumerate(step_paths):
-        logger.info("[job=%s] processing %d/%d: %s",
-                    job_id, i + 1, len(step_paths), os.path.basename(path))
-        res = _run_single(path, profile)
-        results.append(res)
-        store.update_progress(job_id, done=i + 1)
+                store: JobStore, upload_dir: Optional[str] = None) -> None:
+    """Worker function — runs in the thread pool.
 
-    store.set_completed(job_id, results)
-    ok_count = sum(1 for r in results if r["ok"])
-    logger.info("[job=%s] done — %d/%d ok", job_id, ok_count, len(results))
+    `upload_dir` (if given) holds the client's uploaded STEP files for this batch;
+    it is always removed once processing finishes — success or failure — so no
+    uploaded file is ever left on disk after the job completes (matches the
+    no-retention data-handling policy).
+    """
+    store.set_processing(job_id)
+    try:
+        results = []
+        for i, path in enumerate(step_paths):
+            logger.info("[job=%s] processing %d/%d: %s",
+                        job_id, i + 1, len(step_paths), os.path.basename(path))
+            res = _run_single(path, profile)
+            results.append(res)
+            store.update_progress(job_id, done=i + 1)
+
+        store.set_completed(job_id, results)
+        ok_count = sum(1 for r in results if r["ok"])
+        logger.info("[job=%s] done — %d/%d ok", job_id, ok_count, len(results))
+    finally:
+        if upload_dir:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            logger.info("[job=%s] uploaded files deleted", job_id)
 
 
 class WorkerPool:
@@ -110,12 +118,12 @@ class WorkerPool:
             self._executor.shutdown(wait=False, cancel_futures=True)
             logger.info("WorkerPool stopped")
 
-    def submit(self, job_id: str, step_paths: List[str],
-               profile: dict, store: JobStore) -> Future:
+    def submit(self, job_id: str, step_paths: List[str], profile: dict,
+               store: JobStore, upload_dir: Optional[str] = None) -> Future:
         if self._executor is None:
             raise RuntimeError("WorkerPool not started")
         future = self._executor.submit(
-            _batch_task, job_id, step_paths, profile, store
+            _batch_task, job_id, step_paths, profile, store, upload_dir
         )
         future.add_done_callback(lambda f: _on_future_done(f, job_id, store))
         return future

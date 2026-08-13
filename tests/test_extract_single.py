@@ -10,12 +10,19 @@ Tests:
 - Oversized filename still works (name is sanitized)
 - Custom inline bend profile is applied correctly
 - include_visualization=false skips PNG generation
+- Path-traversal filenames are sanitized (never escape the upload sandbox)
+- A slow/hanging extraction is bounded by SINGLE_TIMEOUT_S -> 504
 """
+import asyncio
 import base64
+import glob
 import json
 import os
+import tempfile
 import pytest
 import pytest_asyncio
+
+from api.routers import extract as extract_router
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -192,3 +199,80 @@ async def test_single_all_features_in_bounds(client):
     data = resp.json()
     oob = data["result"]["validation"]["out_of_bounds_ids"]
     assert oob == [], f"Unexpected out-of-bounds features: {oob}"
+
+
+# ── security regressions ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("evil_name,expected_base", [
+    ("../../../../tmp/evil.stp", "evil.stp"),
+    ("..\\..\\..\\evil.stp", "..\\..\\..\\evil.stp"),  # no '/' -> basename is a no-op; harmless literal chars on POSIX
+    ("/etc/cron.d/evil.stp", "evil.stp"),
+    ("../../evil.stp", "evil.stp"),
+])
+def test_safe_filename_strips_traversal(evil_name, expected_base):
+    """_safe_filename must reduce any path-traversal payload to a bare base name."""
+    safe = extract_router._safe_filename(evil_name)
+    assert "/" not in safe.replace(expected_base, "")  # no residual directory separators
+    assert safe  # never empty
+
+
+def test_safe_filename_disambiguates_collisions():
+    """Two uploads with the same name in one batch must not collide."""
+    used = set()
+    a = extract_router._safe_filename("part.stp", used)
+    b = extract_router._safe_filename("part.stp", used)
+    assert a != b
+    assert a == "part.stp"
+    assert b == "part_2.stp"
+
+
+@pytest.mark.asyncio
+async def test_single_path_traversal_filename_is_sandboxed(client):
+    """A malicious filename must never cause a write outside the upload tmpdir —
+    the request must still succeed (the file is saved safely under a sanitized name)."""
+    stp_path = os.path.join(FIXTURES_DIR, "SBV13019.stp")
+    tmp_root = tempfile.gettempdir()
+    before = set(glob.glob(os.path.join(tmp_root, "busbarx_traversal_poc*")))
+
+    with open(stp_path, "rb") as fh:
+        resp = await client.post(
+            "/v1/extract/single",
+            files={"file": ("../../../../tmp/busbarx_traversal_poc.stp", fh,
+                            "application/octet-stream")},
+            data={"profile_name": "default", "include_visualization": "false"},
+        )
+
+    # No file must have appeared outside the sandbox at the traversal target.
+    after = set(glob.glob(os.path.join(tmp_root, "busbarx_traversal_poc*")))
+    assert after == before, "path traversal wrote a file outside the upload sandbox"
+    # And the request itself must succeed normally (sanitized name, processed fine).
+    assert resp.status_code == 200, resp.text
+
+
+# ── timeout enforcement ──────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_single_extraction_timeout_returns_504(client, monkeypatch):
+    """A slow extraction must be aborted at SINGLE_TIMEOUT_S with a 504, not hang."""
+    monkeypatch.setattr(extract_router, "SINGLE_TIMEOUT_S", 1)
+
+    def _slow_to_json(step_path, profile):
+        import time
+        time.sleep(5)
+        return {}
+
+    monkeypatch.setattr(extract_router._extract, "to_json", _slow_to_json)
+
+    stp_path = os.path.join(FIXTURES_DIR, "SBV13019.stp")
+    t0 = asyncio.get_event_loop().time()
+    with open(stp_path, "rb") as fh:
+        resp = await client.post(
+            "/v1/extract/single",
+            files={"file": ("SBV13019.stp", fh, "application/octet-stream")},
+            data={"profile_name": "default", "include_visualization": "false"},
+        )
+    elapsed = asyncio.get_event_loop().time() - t0
+
+    assert resp.status_code == 504, resp.text
+    assert "timed out" in resp.json()["detail"].lower()
+    assert elapsed < 4, f"response took {elapsed:.1f}s — timeout was not enforced promptly"

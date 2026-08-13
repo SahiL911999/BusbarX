@@ -6,6 +6,7 @@ Extract router — /v1/extract/single and /v1/extract/batch
 /v1/profiles        GET   — list built-in bend profiles
 /v1/profiles/validate POST — validate a custom profile JSON without running extraction
 """
+import asyncio
 import base64
 import json
 import logging
@@ -13,7 +14,7 @@ import os
 import tempfile
 import time
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
@@ -32,7 +33,6 @@ from ..models.responses import (
     StepV2Result,
 )
 from ..services.job_store import get_store
-from ..services.worker import _run_single
 
 logger = logging.getLogger("busbarx.router.extract")
 
@@ -83,10 +83,34 @@ def _resolve_profile(profile_name: str, profile_json: Optional[str]) -> dict:
         )
 
 
-async def _save_upload(upload: UploadFile, dest_dir: str) -> str:
-    """Save an uploaded file to dest_dir and return its path."""
+def _safe_filename(filename: Optional[str], used: Optional[Set[str]] = None) -> str:
+    """Sanitize a client-supplied filename to a bare base name — strips any
+    directory-traversal / path components (e.g. '../../etc/x.stp' -> 'x.stp') so
+    it can never be joined outside its intended destination directory. If `used`
+    is given, disambiguates collisions within one request (two uploads with the
+    same name would otherwise silently overwrite each other before processing).
+    """
+    name = os.path.basename((filename or "").replace("\\", "/").strip())
+    if not name or name in (".", ".."):
+        name = f"{uuid.uuid4()}.stp"
+    if used is not None:
+        base, ext = os.path.splitext(name)
+        candidate, n = name, 1
+        while candidate in used:
+            n += 1
+            candidate = f"{base}_{n}{ext}"
+        used.add(candidate)
+        name = candidate
+    return name
+
+
+async def _save_upload(upload: UploadFile, dest_dir: str,
+                        used: Optional[Set[str]] = None) -> str:
+    """Save an uploaded file to dest_dir and return its path. The filename is
+    sanitized so it can never escape dest_dir (path traversal) or collide with
+    another file already saved in the same request."""
     _validate_extension(upload.filename or "file.stp")
-    dest = os.path.join(dest_dir, upload.filename or f"{uuid.uuid4()}.stp")
+    dest = os.path.join(dest_dir, _safe_filename(upload.filename, used))
     content = await upload.read()
     if len(content) > MAX_FILE_SIZE_MB * 1024 * 1024:
         raise HTTPException(
@@ -103,6 +127,28 @@ def _encode_png(png_path: Optional[str]) -> Optional[str]:
         return None
     with open(png_path, "rb") as fh:
         return base64.b64encode(fh.read()).decode("ascii")
+
+
+def _extract_and_render(step_path: str, profile: dict, tmpdir: str, part: str,
+                        include_visualization: bool):
+    """CPU-bound work for /extract/single — runs off the event loop via
+    asyncio.to_thread so a slow/pathological file can be bounded by a timeout
+    instead of tying up the request indefinitely. Raises on extraction failure;
+    render failures are swallowed (logged) and simply omit the PNG, matching the
+    previous inline behavior."""
+    result = _extract.to_json(step_path, profile=profile)
+    png_b64 = None
+    if include_visualization:
+        json_path = os.path.join(tmpdir, part + ".json")
+        png_path = os.path.join(tmpdir, part + "_flat.png")
+        with open(json_path, "w", encoding="utf-8") as fh:
+            json.dump(result, fh, indent=2)
+        try:
+            _render.render(json_path, png_path)
+            png_b64 = _encode_png(png_path)
+        except Exception as render_exc:
+            logger.warning("render skipped: %s", render_exc)
+    return result, png_b64
 
 
 # ── single ────────────────────────────────────────────────────────────────────
@@ -149,25 +195,23 @@ async def extract_single(
         logger.info("[job=%s] single extract: %s (profile=%s)", job_id, part, profile.get("name"))
 
         try:
-            result = _extract.to_json(step_path, profile=profile)
+            result, png_b64 = await asyncio.wait_for(
+                asyncio.to_thread(_extract_and_render, step_path, profile, tmpdir,
+                                  part, include_visualization),
+                timeout=SINGLE_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            logger.error("[job=%s] extraction timed out after %ss", job_id, SINGLE_TIMEOUT_S)
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=f"Extraction timed out after {SINGLE_TIMEOUT_S}s.",
+            )
         except Exception as exc:
             logger.exception("[job=%s] extraction error", job_id)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Extraction failed: {exc}",
             )
-
-        png_b64 = None
-        if include_visualization:
-            json_path = os.path.join(tmpdir, part + ".json")
-            png_path = os.path.join(tmpdir, part + "_flat.png")
-            with open(json_path, "w", encoding="utf-8") as fh:
-                json.dump(result, fh, indent=2)
-            try:
-                _render.render(json_path, png_path)
-                png_b64 = _encode_png(png_path)
-            except Exception as render_exc:
-                logger.warning("[job=%s] render skipped: %s", job_id, render_exc)
 
     elapsed = round(time.perf_counter() - t0, 3)
     logger.info("[job=%s] done in %.2fs", job_id, elapsed)
@@ -219,9 +263,10 @@ async def extract_batch(
     job_id = store.create(file_count=len(files))
     upload_dir = tempfile.mkdtemp(prefix=f"busbarx_batch_{job_id}_")
 
+    used_names: Set[str] = set()
     step_paths = []
     for upload in files:
-        path = await _save_upload(upload, upload_dir)
+        path = await _save_upload(upload, upload_dir, used=used_names)
         step_paths.append(path)
 
     logger.info("[job=%s] batch submitted: %d files, profile=%s",
@@ -235,7 +280,7 @@ async def extract_batch(
         request.app.state.pool = WorkerPool(n)
         request.app.state.pool.start()
     pool = request.app.state.pool
-    pool.submit(job_id, step_paths, profile, store)
+    pool.submit(job_id, step_paths, profile, store, upload_dir=upload_dir)
 
     return BatchSubmitResponse(
         job_id=job_id,

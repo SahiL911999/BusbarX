@@ -4,6 +4,7 @@ BusbarX Nexus — Production FastAPI Application
 Entry point: `api/main.py`
 Start with: uvicorn api.main:app --host 0.0.0.0 --port 8000
 """
+import asyncio
 import logging
 import os
 import time
@@ -16,6 +17,7 @@ from fastapi.responses import JSONResponse
 
 from .middleware.auth import APIKeyMiddleware
 from .routers import extract, jobs
+from .services.job_store import get_store
 from .services.worker import WorkerPool
 
 # ── logging ───────────────────────────────────────────────────────────────────
@@ -27,14 +29,44 @@ logging.basicConfig(
 logger = logging.getLogger("busbarx.api")
 
 
-# ── lifespan (start / stop worker pool) ───────────────────────────────────────
+# ── lifespan (start / stop worker pool + background job eviction) ────────────
+JOB_EVICT_INTERVAL_S = 600  # sweep expired job records every 10 minutes
+
+
+async def _evict_expired_jobs_loop():
+    store = get_store()
+    try:
+        while True:
+            await asyncio.sleep(JOB_EVICT_INTERVAL_S)
+            n = store.evict_expired()
+            if n:
+                logger.info("Evicted %d expired job record(s)", n)
+    except asyncio.CancelledError:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     n_threads = int(os.getenv("WORKER_THREADS", "4"))
     logger.info("Starting BusbarX API — worker threads: %d", n_threads)
     app.state.pool = WorkerPool(n_threads)
     app.state.pool.start()
+
+    if not os.getenv("API_KEY", "").strip():
+        logger.warning(
+            "API_KEY is not set — this instance accepts UNAUTHENTICATED requests. "
+            "Set API_KEY in the environment before exposing this service publicly."
+        )
+
+    evict_task = asyncio.create_task(_evict_expired_jobs_loop())
+
     yield
+
+    evict_task.cancel()
+    try:
+        await evict_task
+    except asyncio.CancelledError:
+        pass
     logger.info("Shutting down worker pool…")
     app.state.pool.stop()
 
@@ -56,11 +88,17 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
+# Auth is via the X-API-Key header (see middleware/auth.py), not cookies, so this
+# service never needs credentialed cross-origin requests. Starlette's CORSMiddleware
+# reflects the caller's Origin back when allow_origins=["*"] + allow_credentials=True
+# is combined (the browser spec forbids literal "*" with credentials) — i.e. that
+# combination effectively trusts every origin. Keeping allow_credentials=False makes
+# the wildcard default safe regardless of CORS_ORIGINS.
 ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -88,13 +126,19 @@ async def request_meta(request: Request, call_next):
 async def unhandled_exception(request: Request, exc: Exception):
     request_id = getattr(request.state, "request_id", "unknown")
     logger.exception("Unhandled error [%s]: %s", request_id, exc)
+    # Full exception text (can include internal paths) goes to the server log only.
+    # Callers get a generic message + request_id to correlate, unless LOG_LEVEL=debug.
+    detail = str(exc) if LOG_LEVEL == "DEBUG" else (
+        "An unexpected error occurred. If this persists, contact support with the "
+        "request_id below."
+    )
     return JSONResponse(
         status_code=500,
         content={
             "type": "https://busbarx.io/errors/internal",
             "title": "Internal Server Error",
             "status": 500,
-            "detail": str(exc),
+            "detail": detail,
             "request_id": request_id,
         },
     )
